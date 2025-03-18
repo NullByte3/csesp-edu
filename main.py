@@ -12,6 +12,18 @@ from PySide6.QtWidgets import QApplication, QWidget, QGraphicsView, QGraphicsSce
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtGui import QPen, QColor, QFont, QPainter
 
+# Constants
+ESP_UPDATE_INTERVAL = 1
+FULLSCREEN_WIDTH = 1920
+FULLSCREEN_HEIGHT = 1080
+CENTER_DOT_SIZE = 2
+FPS_FONT_SIZE = 10
+DISTANCE_FONT_SIZE = 9
+BOX_COLOR = QColor(255, 0, 0)
+HEALTH_BAR_BG_COLOR = QColor(0, 0, 0, 128)
+HEALTH_BAR_COLOR = QColor(0, 255, 0, 200)
+DISTANCE_UNIT_CONVERSION = 0.0254
+
 class ESPSignals(QObject):
     toggle_signal = Signal()
 
@@ -40,7 +52,7 @@ class ESPOverlay(QWidget):
         
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_esp)
-        self.timer.start(1)
+        self.timer.start(ESP_UPDATE_INTERVAL)
         
         # Initialize memory
         self.pm = pymem.Pymem("cs2.exe")
@@ -80,7 +92,7 @@ class ESPOverlay(QWidget):
         self.esp_active = not self.esp_active
         if self.esp_active:
             self.show()
-            self.timer.start(1)
+            self.timer.start(ESP_UPDATE_INTERVAL)
             print("ESP enabled")
         else:
             self.scene.clear()
@@ -101,7 +113,7 @@ def get_window_info():
         width = rect[2] - rect[0]
         height = rect[3] - rect[1]
         return rect[0], rect[1], width, height
-    return 0, 0, 1920, 1080
+    return 0, 0, FULLSCREEN_WIDTH, FULLSCREEN_HEIGHT
 
 def w2s(matrix, x, y, z, width, height):
     w = matrix[12] * x + matrix[13] * y + matrix[14] * z + matrix[15]
@@ -142,11 +154,11 @@ def draw_esp(scene, pm, client, offsets, client_dll, width, height):
     list_entry = pm.read_longlong(entity_list + 0x10)
     
     # Draw center indicator (1 pixel dot)
-    scene.addEllipse(width/2-1, height/2-1, 2, 2, QPen(QColor(255,255,255)), QColor(255,255,255))
+    scene.addEllipse(width/2-1, height/2-1, CENTER_DOT_SIZE, CENTER_DOT_SIZE, QPen(QColor(255,255,255)), QColor(255,255,255))
     
     # Draw FPS
     fps = int(1/(time.time()%1+0.001))
-    fps_text = scene.addText(f"ESP | FPS: {fps}", QFont("Arial", 10))
+    fps_text = scene.addText(f"ESP | FPS: {fps}", QFont("Arial", FPS_FONT_SIZE))
     fps_text.setDefaultTextColor(QColor(255,255,255))
     
     # Loop through entities
@@ -201,16 +213,15 @@ def draw_esp(scene, pm, client, offsets, client_dll, width, height):
             box_width = box_height * 0.5
             
             # Draw box
-            color = QColor(255, 0, 0)  # Enemy = Red
             scene.addRect(head_pos[0] - box_width/2, head_pos[1], 
-                        box_width, box_height, QPen(color, 2), Qt.NoBrush)
+                        box_width, box_height, QPen(BOX_COLOR, 2), Qt.NoBrush)
             
             # Draw health bar
             hp_height = box_height * (health/100)
             scene.addRect(head_pos[0] - box_width/2 - 8, head_pos[1], 
-                        5, box_height, QPen(QColor(0,0,0), 1), QColor(0,0,0,128))
+                        5, box_height, QPen(QColor(0,0,0), 1), HEALTH_BAR_BG_COLOR)
             scene.addRect(head_pos[0] - box_width/2 - 8, head_pos[1] + box_height - hp_height, 
-                        5, hp_height, QPen(QColor(0,255,0), 1), QColor(0,255,0,200))
+                        5, hp_height, QPen(QColor(0,255,0), 1), HEALTH_BAR_COLOR)
             
             # Get local player position
             local_scene = pm.read_longlong(local_player + m_pGameSceneNode)
@@ -220,11 +231,11 @@ def draw_esp(scene, pm, client, offsets, client_dll, width, height):
             local_z = pm.read_float(local_bone + 0 * 0x20 + 0x8)
             
             # Calculate distance in meters (Source 2 uses inches as base unit)
-            distance = math.sqrt((head_x - local_x)**2 + (head_y - local_y)**2 + (feet_z - local_z)**2) * 0.0254
+            distance = math.sqrt((head_x - local_x)**2 + (head_y - local_y)**2 + (feet_z - local_z)**2) * DISTANCE_UNIT_CONVERSION
             
             # Draw distance text
-            distance_text = scene.addText(f"{distance:.1f}m", QFont("Arial", 9))
-            distance_text.setDefaultTextColor(color)
+            distance_text = scene.addText(f"{distance:.1f}m", QFont("Arial", DISTANCE_FONT_SIZE))
+            distance_text.setDefaultTextColor(BOX_COLOR)
             distance_text.setPos(head_pos[0] + box_width/2 + 5, head_pos[1])
             
         except Exception:
