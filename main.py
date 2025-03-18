@@ -78,10 +78,7 @@ class ESPOverlay(QWidget):
                 self.scene.setSceneRect(-self.width/2, -self.height/2, self.width, self.height)
             
             self.scene.clear()
-            try:
-                draw_esp(self.scene, self.pm, self.client, self.offsets, self.client_dll, self.width, self.height)
-            except Exception as e:
-                pass
+            draw_esp(self.scene, self.pm, self.client, self.offsets, self.client_dll, self.width, self.height)
 
     def toggle_esp(self):
         # This can be called from any thread
@@ -163,83 +160,79 @@ def draw_esp(scene, pm, client, offsets, client_dll, width, height):
     
     # Loop through entities
     for i in range(1, 64):
-        try:
-            # Get entity controller
-            controller = pm.read_longlong(list_entry + 0x78 * (i & 0x1FF))
-            if controller == 0:
-                continue
-                
-            # Get pawn handle
-            pawn_handle = pm.read_longlong(controller + m_hPlayerPawn)
-            if pawn_handle == 0:
-                continue
-                
-            # Get pawn entry and address
-            list_entry2 = pm.read_longlong(entity_list + 0x8 * ((pawn_handle & 0x7FFF) >> 9) + 0x10)
-            pawn = pm.read_longlong(list_entry2 + 0x78 * (pawn_handle & 0x1FF))
+        # Get entity controller
+        controller = pm.read_longlong(list_entry + 0x78 * (i & 0x1FF))
+        if controller == 0:
+            continue
             
-            # Skip if pawn is local player or invalid
-            if pawn == 0 or pawn == local_player:
-                continue
-                
-            # Get entity info
-            team = pm.read_int(pawn + m_iTeamNum)
-            health = pm.read_int(pawn + m_iHealth)
-            state = pm.read_int(pawn + m_lifeState)
+        # Get pawn handle
+        pawn_handle = pm.read_longlong(controller + m_hPlayerPawn)
+        if pawn_handle == 0:
+            continue
             
-            # Skip teammates and dead players (enemy only ESP)
-            if team == local_team or health <= 0 or state != 256:
-                continue
+        # Get pawn entry and address
+        list_entry2 = pm.read_longlong(entity_list + 0x8 * ((pawn_handle & 0x7FFF) >> 9) + 0x10)
+        pawn = pm.read_longlong(list_entry2 + 0x78 * (pawn_handle & 0x1FF))
+        
+        # Skip if pawn is local player or invalid
+        if pawn == 0 or pawn == local_player:
+            continue
             
-            # Get bone matrix
-            game_scene = pm.read_longlong(pawn + m_pGameSceneNode)
-            bone_matrix = pm.read_longlong(game_scene + m_modelState + 0x80)
-                
-            # Get head and feet positions
-            head_x = pm.read_float(bone_matrix + 6 * 0x20)
-            head_y = pm.read_float(bone_matrix + 6 * 0x20 + 0x4)
-            head_z = pm.read_float(bone_matrix + 6 * 0x20 + 0x8) + 8
-            head_pos = w2s(view_matrix, head_x, head_y, head_z, width, height)
+        # Get entity info
+        team = pm.read_int(pawn + m_iTeamNum)
+        health = pm.read_int(pawn + m_iHealth)
+        state = pm.read_int(pawn + m_lifeState)
+        
+        # Skip teammates and dead players (enemy only ESP)
+        if team == local_team or health <= 0 or state != 256:
+            continue
+        
+        # Get bone matrix
+        game_scene = pm.read_longlong(pawn + m_pGameSceneNode)
+        bone_matrix = pm.read_longlong(game_scene + m_modelState + 0x80)
             
-            feet_z = pm.read_float(bone_matrix + 0 * 0x20 + 0x8)
-            feet_pos = w2s(view_matrix, head_x, head_y, feet_z, width, height)
+        # Get head and feet positions
+        head_x = pm.read_float(bone_matrix + 6 * 0x20)
+        head_y = pm.read_float(bone_matrix + 6 * 0x20 + 0x4)
+        head_z = pm.read_float(bone_matrix + 6 * 0x20 + 0x8) + 8
+        head_pos = w2s(view_matrix, head_x, head_y, head_z, width, height)
+        
+        feet_z = pm.read_float(bone_matrix + 0 * 0x20 + 0x8)
+        feet_pos = w2s(view_matrix, head_x, head_y, feet_z, width, height)
+        
+        # Skip if offscreen
+        if head_pos[0] <= 0 or head_pos[0] >= width or head_pos[1] <= 0:
+            continue
             
-            # Skip if offscreen
-            if head_pos[0] <= 0 or head_pos[0] >= width or head_pos[1] <= 0:
-                continue
-                
-            # Calculate box dimensions
-            box_height = feet_pos[1] - head_pos[1]
-            box_width = box_height * 0.5
-            
-            # Draw box
-            scene.addRect(head_pos[0] - box_width/2, head_pos[1], 
-                        box_width, box_height, QPen(BOX_COLOR, 2), Qt.NoBrush)
-            
-            # Draw health bar
-            hp_height = box_height * (health/100)
-            scene.addRect(head_pos[0] - box_width/2 - 8, head_pos[1], 
-                        5, box_height, QPen(QColor(0,0,0), 1), HEALTH_BAR_BG_COLOR)
-            scene.addRect(head_pos[0] - box_width/2 - 8, head_pos[1] + box_height - hp_height, 
-                        5, hp_height, QPen(QColor(0,255,0), 1), HEALTH_BAR_COLOR)
-            
-            # Get local player position
-            local_scene = pm.read_longlong(local_player + m_pGameSceneNode)
-            local_bone = pm.read_longlong(local_scene + m_modelState + 0x80)
-            local_x = pm.read_float(local_bone + 0 * 0x20)
-            local_y = pm.read_float(local_bone + 0 * 0x20 + 0x4)
-            local_z = pm.read_float(local_bone + 0 * 0x20 + 0x8)
-            
-            # Calculate distance in meters (Source 2 uses inches as base unit)
-            distance = math.sqrt((head_x - local_x)**2 + (head_y - local_y)**2 + (feet_z - local_z)**2) * DISTANCE_UNIT_CONVERSION
-            
-            # Draw distance text
-            distance_text = scene.addText(f"{distance:.1f}m", QFont("Arial", DISTANCE_FONT_SIZE))
-            distance_text.setDefaultTextColor(BOX_COLOR)
-            distance_text.setPos(head_pos[0] + box_width/2 + 5, head_pos[1])
-            
-        except Exception:
-            pass
+        # Calculate box dimensions
+        box_height = feet_pos[1] - head_pos[1]
+        box_width = box_height * 0.5
+        
+        # Draw box
+        scene.addRect(head_pos[0] - box_width/2, head_pos[1], 
+                    box_width, box_height, QPen(BOX_COLOR, 2), Qt.NoBrush)
+        
+        # Draw health bar
+        hp_height = box_height * (health/100)
+        scene.addRect(head_pos[0] - box_width/2 - 8, head_pos[1], 
+                    5, box_height, QPen(QColor(0,0,0), 1), HEALTH_BAR_BG_COLOR)
+        scene.addRect(head_pos[0] - box_width/2 - 8, head_pos[1] + box_height - hp_height, 
+                    5, hp_height, QPen(QColor(0,255,0), 1), HEALTH_BAR_COLOR)
+        
+        # Get local player position
+        local_scene = pm.read_longlong(local_player + m_pGameSceneNode)
+        local_bone = pm.read_longlong(local_scene + m_modelState + 0x80)
+        local_x = pm.read_float(local_bone + 0 * 0x20)
+        local_y = pm.read_float(local_bone + 0 * 0x20 + 0x4)
+        local_z = pm.read_float(local_bone + 0 * 0x20 + 0x8)
+        
+        # Calculate distance in meters (Source 2 uses inches as base unit)
+        distance = math.sqrt((head_x - local_x)**2 + (head_y - local_y)**2 + (feet_z - local_z)**2) * DISTANCE_UNIT_CONVERSION
+        
+        # Draw distance text
+        distance_text = scene.addText(f"{distance:.1f}m", QFont("Arial", DISTANCE_FONT_SIZE))
+        distance_text.setDefaultTextColor(BOX_COLOR)
+        distance_text.setPos(head_pos[0] + box_width/2 + 5, head_pos[1])
 
 def main():
     print("Simple CS2 ESP - CLI Edition")
